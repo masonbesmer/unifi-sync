@@ -78,6 +78,7 @@ class UnifiClient:
                     self.label, attempt, exc, delay,
                 )
                 await asyncio.sleep(delay)
+        assert last_exc is not None
         raise last_exc
 
     async def discover(self) -> None:
@@ -145,7 +146,7 @@ def rules_differ(local_rule: dict, wan_rule: dict) -> bool:
     )
 
 
-async def sync(local: "UnifiClient", wan: "UnifiClient", config: Config) -> None:
+async def sync(local: UnifiClient, wan: UnifiClient, config: Config) -> None:
     log.info("Starting sync...")
     local_rules = await local.list_port_forwards()
     wan_rules = await wan.list_port_forwards()

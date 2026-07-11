@@ -493,3 +493,95 @@ async def test_main_scheduler_used_when_sync_schedule_set(monkeypatch):
     assert len(call_args[0]) == 2  # (run_sync, trigger) as positional args
     mock_local.close.assert_awaited_once()
     mock_wan.close.assert_awaited_once()
+
+
+async def test_sync_dry_run_skips_delete():
+    from sync import sync, Config
+    config = Config(
+        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        dry_run=True, sync_schedule=None, sync_tag="unifi-sync",
+    )
+    wan_rules = [
+        {"_id": "rule-1", "name": "unifi-sync http", "proto": "tcp",
+         "dst_port": "80", "fwd_port": "80", "fwd_ip": "10.0.0.1", "enabled": True}
+    ]
+    local_client = MagicMock()
+    local_client.list_port_forwards = AsyncMock(return_value=[])
+    wan_client = MagicMock()
+    wan_client.list_port_forwards = AsyncMock(return_value=wan_rules)
+    wan_client.delete_port_forward = AsyncMock()
+    await sync(local_client, wan_client, config)
+    wan_client.delete_port_forward.assert_not_awaited()
+
+
+async def test_sync_dry_run_skips_update():
+    from sync import sync, Config
+    config = Config(
+        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        dry_run=True, sync_schedule=None, sync_tag="unifi-sync",
+    )
+    local_rules = [
+        {"name": "unifi-sync http", "proto": "tcp", "dst_port": "8080",
+         "fwd_port": "80", "fwd_ip": "192.168.0.10", "enabled": True}
+    ]
+    wan_rules = [
+        {"_id": "rule-1", "name": "unifi-sync http", "proto": "tcp",
+         "dst_port": "80", "fwd_port": "80", "fwd_ip": "10.0.0.1", "enabled": True}
+    ]
+    local_client = MagicMock()
+    local_client.list_port_forwards = AsyncMock(return_value=local_rules)
+    wan_client = MagicMock()
+    wan_client.list_port_forwards = AsyncMock(return_value=wan_rules)
+    wan_client.update_port_forward = AsyncMock()
+    await sync(local_client, wan_client, config)
+    wan_client.update_port_forward.assert_not_awaited()
+
+
+@respx.mock
+async def test_retry_on_network_error():
+    from sync import UnifiClient
+    client = UnifiClient("test-key", "TEST")
+    call_count = 0
+    def raise_network_error(request):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 3:
+            raise httpx.NetworkError("connection refused")
+        return httpx.Response(200, json={"data": [{"id": "host-abc"}]})
+    respx.get("https://api.ui.com/v1/hosts").mock(side_effect=raise_network_error)
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        data = await client._request_with_retry("GET", "/v1/hosts")
+    assert data["data"][0]["id"] == "host-abc"
+    await client.close()
+
+
+def test_is_tagged_missing_comment_key():
+    from sync import is_tagged
+    assert is_tagged({"name": "unifi-sync rule"}, "unifi-sync") is True
+    assert is_tagged({"name": "manual"}, "unifi-sync") is False
+
+
+async def test_main_run_sync_swallows_exceptions(monkeypatch):
+    """run_sync() catches sync() exceptions without propagating."""
+    monkeypatch.setenv("WAN_ROUTER_API_KEY", "w")
+    monkeypatch.setenv("LOCAL_ROUTER_API_KEY", "l")
+    monkeypatch.setenv("LOCAL_ROUTER_LAN_ADR", "10.0.0.1")
+    monkeypatch.delenv("SYNC_SCHEDULE", raising=False)
+
+    mock_local = MagicMock()
+    mock_local.discover = AsyncMock()
+    mock_local.list_port_forwards = AsyncMock(side_effect=RuntimeError("sync failed"))
+    mock_local.close = AsyncMock()
+
+    mock_wan = MagicMock()
+    mock_wan.discover = AsyncMock()
+    mock_wan.list_port_forwards = AsyncMock(return_value=[])
+    mock_wan.close = AsyncMock()
+
+    with patch("sync.UnifiClient", side_effect=[mock_local, mock_wan]):
+        from sync import main
+        # Should complete without raising (run_sync swallows the exception)
+        await main()
+
+    mock_local.close.assert_awaited_once()
+    mock_wan.close.assert_awaited_once()
