@@ -1,6 +1,9 @@
 import os
 import sys
 import pytest
+import httpx
+import respx
+from unittest.mock import AsyncMock, patch
 
 
 def test_load_config_exits_when_all_required_missing(monkeypatch):
@@ -50,3 +53,138 @@ def test_load_config_reads_explicit_values(monkeypatch):
     assert config.dry_run is True
     assert config.sync_schedule == "*/5 * * * *"
     assert config.sync_tag == "my-tag"
+
+
+@respx.mock
+async def test_discover_sets_host_and_site():
+    from sync import UnifiClient
+    client = UnifiClient("test-key", "TEST")
+    respx.get("https://api.ui.com/v1/hosts").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "host-abc"}]})
+    )
+    respx.get(
+        "https://api.ui.com/v1/connector/consoles/host-abc/proxy/network/v1/sites"
+    ).mock(return_value=httpx.Response(200, json={"data": [{"name": "default"}]}))
+    await client.discover()
+    assert client.host_id == "host-abc"
+    assert client.site_id == "default"
+    await client.close()
+
+
+@respx.mock
+async def test_discover_exits_on_empty_hosts():
+    from sync import UnifiClient
+    client = UnifiClient("test-key", "TEST")
+    respx.get("https://api.ui.com/v1/hosts").mock(
+        return_value=httpx.Response(200, json={"data": []})
+    )
+    with pytest.raises(SystemExit):
+        await client.discover()
+    await client.close()
+
+
+@respx.mock
+async def test_discover_exits_on_empty_sites():
+    from sync import UnifiClient
+    client = UnifiClient("test-key", "TEST")
+    respx.get("https://api.ui.com/v1/hosts").mock(
+        return_value=httpx.Response(200, json={"data": [{"id": "host-abc"}]})
+    )
+    respx.get(
+        "https://api.ui.com/v1/connector/consoles/host-abc/proxy/network/v1/sites"
+    ).mock(return_value=httpx.Response(200, json={"data": []}))
+    with pytest.raises(SystemExit):
+        await client.discover()
+    await client.close()
+
+
+@respx.mock
+async def test_list_port_forwards():
+    from sync import UnifiClient
+    client = UnifiClient("test-key", "TEST")
+    client.host_id = "host-abc"
+    client.site_id = "default"
+    rules = [
+        {
+            "_id": "1", "name": "unifi-sync http", "proto": "tcp",
+            "dst_port": "8080", "fwd_port": "80", "fwd_ip": "10.0.0.2", "enabled": True,
+        }
+    ]
+    respx.get(
+        "https://api.ui.com/v1/connector/consoles/host-abc/proxy/network/api/s/default/rest/portforward"
+    ).mock(return_value=httpx.Response(200, json={"data": rules}))
+    result = await client.list_port_forwards()
+    assert result == rules
+    await client.close()
+
+
+@respx.mock
+async def test_create_port_forward():
+    from sync import UnifiClient
+    client = UnifiClient("test-key", "TEST")
+    client.host_id = "host-abc"
+    client.site_id = "default"
+    rule = {"name": "unifi-sync ssh", "proto": "tcp", "dst_port": "22", "fwd_port": "22", "fwd_ip": "10.0.0.5", "enabled": True}
+    respx.post(
+        "https://api.ui.com/v1/connector/consoles/host-abc/proxy/network/api/s/default/rest/portforward"
+    ).mock(return_value=httpx.Response(200, json={"data": [rule]}))
+    result = await client.create_port_forward(rule)
+    assert result["data"][0]["name"] == "unifi-sync ssh"
+    await client.close()
+
+
+@respx.mock
+async def test_update_port_forward():
+    from sync import UnifiClient
+    client = UnifiClient("test-key", "TEST")
+    client.host_id = "host-abc"
+    client.site_id = "default"
+    rule = {"name": "unifi-sync ssh", "proto": "tcp", "dst_port": "2222", "fwd_port": "22", "fwd_ip": "10.0.0.5", "enabled": True}
+    respx.put(
+        "https://api.ui.com/v1/connector/consoles/host-abc/proxy/network/api/s/default/rest/portforward/rule-1"
+    ).mock(return_value=httpx.Response(200, json={"data": [rule]}))
+    result = await client.update_port_forward("rule-1", rule)
+    assert result["data"][0]["dst_port"] == "2222"
+    await client.close()
+
+
+@respx.mock
+async def test_delete_port_forward():
+    from sync import UnifiClient
+    client = UnifiClient("test-key", "TEST")
+    client.host_id = "host-abc"
+    client.site_id = "default"
+    respx.delete(
+        "https://api.ui.com/v1/connector/consoles/host-abc/proxy/network/api/s/default/rest/portforward/rule-1"
+    ).mock(return_value=httpx.Response(200, json={"data": []}))
+    await client.delete_port_forward("rule-1")
+    await client.close()
+
+
+@respx.mock
+async def test_retry_succeeds_on_third_attempt():
+    from sync import UnifiClient
+    client = UnifiClient("test-key", "TEST")
+    route = respx.get("https://api.ui.com/v1/hosts")
+    route.side_effect = [
+        httpx.Response(500),
+        httpx.Response(500),
+        httpx.Response(200, json={"data": [{"id": "host-abc"}]}),
+    ]
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        data = await client._request_with_retry("GET", "/v1/hosts")
+    assert data["data"][0]["id"] == "host-abc"
+    await client.close()
+
+
+@respx.mock
+async def test_retry_raises_after_all_attempts_exhausted():
+    from sync import UnifiClient
+    client = UnifiClient("test-key", "TEST")
+    respx.get("https://api.ui.com/v1/hosts").mock(
+        return_value=httpx.Response(503)
+    )
+    with patch("asyncio.sleep", new_callable=AsyncMock):
+        with pytest.raises(httpx.HTTPStatusError):
+            await client._request_with_retry("GET", "/v1/hosts")
+    await client.close()
