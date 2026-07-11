@@ -491,3 +491,5 @@ async def test_main_scheduler_used_when_sync_schedule_set(monkeypatch):
     call_args = mock_scheduler.add_job.call_args
     assert call_args is not None
     assert len(call_args[0]) == 2  # (run_sync, trigger) as positional args
+    mock_local.close.assert_awaited_once()
+    mock_wan.close.assert_awaited_once()
