@@ -251,6 +251,7 @@ async def test_sync_creates_missing_rule():
     config = Config(
         wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+        wan_host_id=None, local_host_id=None,
     )
     local_rules = [
         {"name": "unifi-sync http", "proto": "tcp", "dst_port": "80",
@@ -272,6 +273,7 @@ async def test_sync_deletes_removed_rule():
     config = Config(
         wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+        wan_host_id=None, local_host_id=None,
     )
     wan_rules = [
         {"_id": "rule-1", "name": "unifi-sync http", "proto": "tcp",
@@ -291,6 +293,7 @@ async def test_sync_updates_changed_rule():
     config = Config(
         wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+        wan_host_id=None, local_host_id=None,
     )
     local_rules = [
         {"name": "unifi-sync http", "proto": "tcp", "dst_port": "8080",
@@ -317,6 +320,7 @@ async def test_sync_noop_when_already_in_sync():
     config = Config(
         wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+        wan_host_id=None, local_host_id=None,
     )
     rule = {
         "_id": "r1", "name": "unifi-sync http", "proto": "tcp",
@@ -340,6 +344,7 @@ async def test_sync_dry_run_skips_all_writes():
     config = Config(
         wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
         dry_run=True, sync_schedule=None, sync_tag="unifi-sync",
+        wan_host_id=None, local_host_id=None,
     )
     local_rules = [
         {"name": "unifi-sync http", "proto": "tcp", "dst_port": "80",
@@ -359,6 +364,7 @@ async def test_sync_ignores_untagged_rules():
     config = Config(
         wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+        wan_host_id=None, local_host_id=None,
     )
     local_rules = [
         {"name": "manual-rule", "proto": "tcp", "dst_port": "443",
@@ -378,6 +384,7 @@ async def test_sync_continues_after_single_rule_failure():
     config = Config(
         wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+        wan_host_id=None, local_host_id=None,
     )
     local_rules = [
         {"name": "unifi-sync rule-a", "proto": "tcp", "dst_port": "80",
@@ -500,6 +507,7 @@ async def test_sync_dry_run_skips_delete():
     config = Config(
         wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
         dry_run=True, sync_schedule=None, sync_tag="unifi-sync",
+        wan_host_id=None, local_host_id=None,
     )
     wan_rules = [
         {"_id": "rule-1", "name": "unifi-sync http", "proto": "tcp",
@@ -519,6 +527,7 @@ async def test_sync_dry_run_skips_update():
     config = Config(
         wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
         dry_run=True, sync_schedule=None, sync_tag="unifi-sync",
+        wan_host_id=None, local_host_id=None,
     )
     local_rules = [
         {"name": "unifi-sync http", "proto": "tcp", "dst_port": "8080",

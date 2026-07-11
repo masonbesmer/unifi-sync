@@ -22,6 +22,8 @@ class Config:
     dry_run: bool
     sync_schedule: str | None
     sync_tag: str
+    wan_host_id: str | None
+    local_host_id: str | None
 
 
 def load_config() -> Config:
@@ -46,14 +48,16 @@ def load_config() -> Config:
         dry_run=os.environ.get("DRY_RUN", "false").lower() == "true",
         sync_schedule=os.environ.get("SYNC_SCHEDULE") or None,
         sync_tag=os.environ.get("SYNC_TAG", "unifi-sync"),
+        wan_host_id=os.environ.get("WAN_ROUTER_HOST_ID") or None,
+        local_host_id=os.environ.get("LOCAL_ROUTER_HOST_ID") or None,
     )
 
 
 class UnifiClient:
-    def __init__(self, api_key: str, label: str) -> None:
+    def __init__(self, api_key: str, label: str, host_id: str | None = None) -> None:
         self.api_key = api_key
         self.label = label
-        self.host_id: str | None = None
+        self.host_id: str | None = host_id
         self.site_id: str | None = None
         self._client = httpx.AsyncClient(
             base_url=BASE_URL,
@@ -82,13 +86,16 @@ class UnifiClient:
         raise last_exc
 
     async def discover(self) -> None:
-        data = await self._request_with_retry("GET", "/v1/hosts")
-        hosts = data.get("data", [])
-        if not hosts:
-            log.error("[%s] No hosts found. Check API key permissions.", self.label)
-            sys.exit(1)
-        self.host_id = hosts[0]["id"]
-        log.info("[%s] Using host: %s", self.label, self.host_id)
+        if self.host_id:
+            log.info("[%s] Using host (override): %s", self.label, self.host_id)
+        else:
+            data = await self._request_with_retry("GET", "/v1/hosts")
+            hosts = data.get("data", [])
+            if not hosts:
+                log.error("[%s] No hosts found. Check API key permissions.", self.label)
+                sys.exit(1)
+            self.host_id = hosts[0]["id"]
+            log.info("[%s] Using host: %s", self.label, self.host_id)
 
         site_data = await self._request_with_retry(
             "GET",
@@ -200,8 +207,8 @@ async def sync(local: UnifiClient, wan: UnifiClient, config: Config) -> None:
 
 async def main() -> None:
     config = load_config()
-    local = UnifiClient(config.local_api_key, "LOCAL")
-    wan = UnifiClient(config.wan_api_key, "WAN")
+    local = UnifiClient(config.local_api_key, "LOCAL", host_id=config.local_host_id)
+    wan = UnifiClient(config.wan_api_key, "WAN", host_id=config.wan_host_id)
     try:
         await local.discover()
         await wan.discover()
