@@ -401,3 +401,93 @@ async def test_sync_continues_after_single_rule_failure():
     wan_client.create_port_forward = create_side_effect
     await sync(local_client, wan_client, config)
     assert call_count == 2
+
+
+# --- main() entrypoint tests ---
+
+async def test_main_run_once_calls_close(monkeypatch):
+    """main() calls close() on both clients even in run-once mode."""
+    monkeypatch.setenv("WAN_ROUTER_API_KEY", "w")
+    monkeypatch.setenv("LOCAL_ROUTER_API_KEY", "l")
+    monkeypatch.setenv("LOCAL_ROUTER_LAN_ADR", "10.0.0.1")
+    monkeypatch.delenv("SYNC_SCHEDULE", raising=False)
+
+    mock_local = MagicMock()
+    mock_local.discover = AsyncMock()
+    mock_local.list_port_forwards = AsyncMock(return_value=[])
+    mock_local.close = AsyncMock()
+
+    mock_wan = MagicMock()
+    mock_wan.discover = AsyncMock()
+    mock_wan.list_port_forwards = AsyncMock(return_value=[])
+    mock_wan.close = AsyncMock()
+
+    with patch("sync.UnifiClient", side_effect=[mock_local, mock_wan]):
+        from sync import main
+        await main()
+
+    mock_local.close.assert_awaited_once()
+    mock_wan.close.assert_awaited_once()
+
+
+async def test_main_close_called_even_on_discover_error(monkeypatch):
+    """main() finally block closes clients even when discover() raises."""
+    monkeypatch.setenv("WAN_ROUTER_API_KEY", "w")
+    monkeypatch.setenv("LOCAL_ROUTER_API_KEY", "l")
+    monkeypatch.setenv("LOCAL_ROUTER_LAN_ADR", "10.0.0.1")
+    monkeypatch.delenv("SYNC_SCHEDULE", raising=False)
+
+    mock_local = MagicMock()
+    mock_local.discover = AsyncMock(side_effect=RuntimeError("network down"))
+    mock_local.close = AsyncMock()
+
+    mock_wan = MagicMock()
+    mock_wan.discover = AsyncMock()
+    mock_wan.close = AsyncMock()
+
+    with patch("sync.UnifiClient", side_effect=[mock_local, mock_wan]):
+        from sync import main
+        with pytest.raises(RuntimeError):
+            await main()
+
+    mock_local.close.assert_awaited_once()
+    mock_wan.close.assert_awaited_once()
+
+
+async def test_main_scheduler_used_when_sync_schedule_set(monkeypatch):
+    """main() creates AsyncIOScheduler when SYNC_SCHEDULE is set."""
+    monkeypatch.setenv("WAN_ROUTER_API_KEY", "w")
+    monkeypatch.setenv("LOCAL_ROUTER_API_KEY", "l")
+    monkeypatch.setenv("LOCAL_ROUTER_LAN_ADR", "10.0.0.1")
+    monkeypatch.setenv("SYNC_SCHEDULE", "*/5 * * * *")
+
+    mock_local = MagicMock()
+    mock_local.discover = AsyncMock()
+    mock_local.list_port_forwards = AsyncMock(return_value=[])
+    mock_local.close = AsyncMock()
+
+    mock_wan = MagicMock()
+    mock_wan.discover = AsyncMock()
+    mock_wan.list_port_forwards = AsyncMock(return_value=[])
+    mock_wan.close = AsyncMock()
+
+    mock_scheduler = MagicMock()
+    mock_scheduler.add_job = MagicMock()
+    mock_scheduler.start = MagicMock()
+
+    # asyncio.Event().wait() would block forever; patch it to return immediately
+    mock_event = MagicMock()
+    mock_event.wait = AsyncMock(return_value=None)
+
+    with patch("sync.UnifiClient", side_effect=[mock_local, mock_wan]), \
+         patch("sync.AsyncIOScheduler", return_value=mock_scheduler), \
+         patch("sync.asyncio.Event", return_value=mock_event):
+        from sync import main
+        await main()
+
+    mock_scheduler.add_job.assert_called_once()
+    mock_scheduler.start.assert_called_once()
+    # Verify add_job was called with a callable (run_sync) and a CronTrigger positional arg
+    call_args = mock_scheduler.add_job.call_args
+    assert call_args is not None
+    assert len(call_args[0]) == 2  # (run_sync, trigger) as positional args
