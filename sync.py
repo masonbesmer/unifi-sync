@@ -5,6 +5,8 @@ import sys
 from dataclasses import dataclass
 
 import httpx
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -119,3 +121,108 @@ class UnifiClient:
 
     async def close(self) -> None:
         await self._client.aclose()
+
+
+def is_tagged(rule: dict, tag: str) -> bool:
+    return tag in rule.get("name", "") or tag in rule.get("comment", "")
+
+
+def make_wan_rule(local_rule: dict, fwd_ip: str) -> dict:
+    return {
+        "name": local_rule["name"],
+        "proto": local_rule["proto"],
+        "dst_port": local_rule["dst_port"],
+        "fwd_port": local_rule["fwd_port"],
+        "fwd_ip": fwd_ip,
+        "enabled": local_rule.get("enabled", True),
+    }
+
+
+def rules_differ(local_rule: dict, wan_rule: dict) -> bool:
+    return any(
+        local_rule.get(f) != wan_rule.get(f)
+        for f in ("proto", "dst_port", "fwd_port", "enabled")
+    )
+
+
+async def sync(local: "UnifiClient", wan: "UnifiClient", config: Config) -> None:
+    log.info("Starting sync...")
+    local_rules = await local.list_port_forwards()
+    wan_rules = await wan.list_port_forwards()
+
+    tagged_local = {r["name"]: r for r in local_rules if is_tagged(r, config.sync_tag)}
+    tagged_wan = {r["name"]: r for r in wan_rules if is_tagged(r, config.sync_tag)}
+
+    local_names = set(tagged_local)
+    wan_names = set(tagged_wan)
+    created = deleted = updated = 0
+
+    for name in local_names - wan_names:
+        rule = make_wan_rule(tagged_local[name], config.local_router_lan_adr)
+        if config.dry_run:
+            log.info("[DRY RUN] would CREATE: %s", name)
+        else:
+            try:
+                await wan.create_port_forward(rule)
+                log.info("CREATED: %s", name)
+                created += 1
+            except Exception as exc:
+                log.error("Failed to CREATE %s: %s", name, exc)
+
+    for name in wan_names - local_names:
+        wan_rule = tagged_wan[name]
+        if config.dry_run:
+            log.info("[DRY RUN] would DELETE: %s", name)
+        else:
+            try:
+                await wan.delete_port_forward(wan_rule["_id"])
+                log.info("DELETED: %s", name)
+                deleted += 1
+            except Exception as exc:
+                log.error("Failed to DELETE %s: %s", name, exc)
+
+    for name in local_names & wan_names:
+        if rules_differ(tagged_local[name], tagged_wan[name]):
+            rule = make_wan_rule(tagged_local[name], config.local_router_lan_adr)
+            if config.dry_run:
+                log.info("[DRY RUN] would UPDATE: %s", name)
+            else:
+                try:
+                    await wan.update_port_forward(tagged_wan[name]["_id"], rule)
+                    log.info("UPDATED: %s", name)
+                    updated += 1
+                except Exception as exc:
+                    log.error("Failed to UPDATE %s: %s", name, exc)
+
+    log.info("Sync complete. created=%d deleted=%d updated=%d", created, deleted, updated)
+
+
+async def main() -> None:
+    config = load_config()
+    local = UnifiClient(config.local_api_key, "LOCAL")
+    wan = UnifiClient(config.wan_api_key, "WAN")
+    try:
+        await local.discover()
+        await wan.discover()
+
+        async def run_sync() -> None:
+            try:
+                await sync(local, wan, config)
+            except Exception:
+                log.exception("Sync run failed")
+
+        if config.sync_schedule:
+            scheduler = AsyncIOScheduler()
+            scheduler.add_job(run_sync, CronTrigger.from_crontab(config.sync_schedule))
+            scheduler.start()
+            log.info("Scheduler started with cron: %s", config.sync_schedule)
+            await asyncio.Event().wait()
+        else:
+            await run_sync()
+    finally:
+        await local.close()
+        await wan.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

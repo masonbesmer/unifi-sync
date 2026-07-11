@@ -3,7 +3,7 @@ import sys
 import pytest
 import httpx
 import respx
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 def test_load_config_exits_when_all_required_missing(monkeypatch):
@@ -188,3 +188,216 @@ async def test_retry_raises_after_all_attempts_exhausted():
         with pytest.raises(httpx.HTTPStatusError):
             await client._request_with_retry("GET", "/v1/hosts")
     await client.close()
+
+
+# --- Pure helper tests ---
+
+def test_is_tagged_matches_name():
+    from sync import is_tagged
+    assert is_tagged({"name": "unifi-sync http", "comment": ""}, "unifi-sync") is True
+
+
+def test_is_tagged_matches_comment():
+    from sync import is_tagged
+    assert is_tagged({"name": "my-rule", "comment": "unifi-sync"}, "unifi-sync") is True
+
+
+def test_is_tagged_no_match():
+    from sync import is_tagged
+    assert is_tagged({"name": "manual-rule", "comment": ""}, "unifi-sync") is False
+
+
+def test_make_wan_rule_overrides_fwd_ip():
+    from sync import make_wan_rule
+    local = {
+        "name": "unifi-sync ssh", "proto": "tcp",
+        "dst_port": "22", "fwd_port": "22",
+        "fwd_ip": "10.0.0.99", "enabled": True,
+    }
+    result = make_wan_rule(local, "192.168.1.50")
+    assert result["fwd_ip"] == "192.168.1.50"
+    assert result["name"] == "unifi-sync ssh"
+    assert result["proto"] == "tcp"
+    assert result["dst_port"] == "22"
+    assert result["fwd_port"] == "22"
+    assert result["enabled"] is True
+    assert "_id" not in result
+
+
+def test_rules_differ_detects_port_change():
+    from sync import rules_differ
+    local = {"proto": "tcp", "dst_port": "8080", "fwd_port": "80", "enabled": True}
+    wan = {"proto": "tcp", "dst_port": "9090", "fwd_port": "80", "enabled": True}
+    assert rules_differ(local, wan) is True
+
+
+def test_rules_differ_detects_proto_change():
+    from sync import rules_differ
+    local = {"proto": "tcp", "dst_port": "80", "fwd_port": "80", "enabled": True}
+    wan = {"proto": "udp", "dst_port": "80", "fwd_port": "80", "enabled": True}
+    assert rules_differ(local, wan) is True
+
+
+def test_rules_differ_returns_false_when_same():
+    from sync import rules_differ
+    rule = {"proto": "tcp", "dst_port": "80", "fwd_port": "80", "enabled": True}
+    assert rules_differ(rule, rule) is False
+
+
+# --- Sync orchestration tests ---
+
+async def test_sync_creates_missing_rule():
+    from sync import sync, Config
+    config = Config(
+        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+    )
+    local_rules = [
+        {"name": "unifi-sync http", "proto": "tcp", "dst_port": "80",
+         "fwd_port": "80", "fwd_ip": "192.168.0.10", "enabled": True}
+    ]
+    local_client = MagicMock()
+    local_client.list_port_forwards = AsyncMock(return_value=local_rules)
+    wan_client = MagicMock()
+    wan_client.list_port_forwards = AsyncMock(return_value=[])
+    wan_client.create_port_forward = AsyncMock(return_value={})
+    await sync(local_client, wan_client, config)
+    wan_client.create_port_forward.assert_awaited_once()
+    call_arg = wan_client.create_port_forward.call_args[0][0]
+    assert call_arg["fwd_ip"] == "10.0.0.1"
+
+
+async def test_sync_deletes_removed_rule():
+    from sync import sync, Config
+    config = Config(
+        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+    )
+    wan_rules = [
+        {"_id": "rule-1", "name": "unifi-sync http", "proto": "tcp",
+         "dst_port": "80", "fwd_port": "80", "fwd_ip": "10.0.0.1", "enabled": True}
+    ]
+    local_client = MagicMock()
+    local_client.list_port_forwards = AsyncMock(return_value=[])
+    wan_client = MagicMock()
+    wan_client.list_port_forwards = AsyncMock(return_value=wan_rules)
+    wan_client.delete_port_forward = AsyncMock(return_value=None)
+    await sync(local_client, wan_client, config)
+    wan_client.delete_port_forward.assert_awaited_once_with("rule-1")
+
+
+async def test_sync_updates_changed_rule():
+    from sync import sync, Config
+    config = Config(
+        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+    )
+    local_rules = [
+        {"name": "unifi-sync http", "proto": "tcp", "dst_port": "8080",
+         "fwd_port": "80", "fwd_ip": "192.168.0.10", "enabled": True}
+    ]
+    wan_rules = [
+        {"_id": "rule-1", "name": "unifi-sync http", "proto": "tcp",
+         "dst_port": "80", "fwd_port": "80", "fwd_ip": "10.0.0.1", "enabled": True}
+    ]
+    local_client = MagicMock()
+    local_client.list_port_forwards = AsyncMock(return_value=local_rules)
+    wan_client = MagicMock()
+    wan_client.list_port_forwards = AsyncMock(return_value=wan_rules)
+    wan_client.update_port_forward = AsyncMock(return_value={})
+    await sync(local_client, wan_client, config)
+    wan_client.update_port_forward.assert_awaited_once_with("rule-1", {
+        "name": "unifi-sync http", "proto": "tcp", "dst_port": "8080",
+        "fwd_port": "80", "fwd_ip": "10.0.0.1", "enabled": True,
+    })
+
+
+async def test_sync_noop_when_already_in_sync():
+    from sync import sync, Config
+    config = Config(
+        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+    )
+    rule = {
+        "_id": "r1", "name": "unifi-sync http", "proto": "tcp",
+        "dst_port": "80", "fwd_port": "80", "fwd_ip": "10.0.0.1", "enabled": True,
+    }
+    local_client = MagicMock()
+    local_client.list_port_forwards = AsyncMock(return_value=[rule])
+    wan_client = MagicMock()
+    wan_client.list_port_forwards = AsyncMock(return_value=[rule])
+    wan_client.create_port_forward = AsyncMock()
+    wan_client.update_port_forward = AsyncMock()
+    wan_client.delete_port_forward = AsyncMock()
+    await sync(local_client, wan_client, config)
+    wan_client.create_port_forward.assert_not_awaited()
+    wan_client.update_port_forward.assert_not_awaited()
+    wan_client.delete_port_forward.assert_not_awaited()
+
+
+async def test_sync_dry_run_skips_all_writes():
+    from sync import sync, Config
+    config = Config(
+        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        dry_run=True, sync_schedule=None, sync_tag="unifi-sync",
+    )
+    local_rules = [
+        {"name": "unifi-sync http", "proto": "tcp", "dst_port": "80",
+         "fwd_port": "80", "fwd_ip": "192.168.0.10", "enabled": True}
+    ]
+    local_client = MagicMock()
+    local_client.list_port_forwards = AsyncMock(return_value=local_rules)
+    wan_client = MagicMock()
+    wan_client.list_port_forwards = AsyncMock(return_value=[])
+    wan_client.create_port_forward = AsyncMock()
+    await sync(local_client, wan_client, config)
+    wan_client.create_port_forward.assert_not_awaited()
+
+
+async def test_sync_ignores_untagged_rules():
+    from sync import sync, Config
+    config = Config(
+        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+    )
+    local_rules = [
+        {"name": "manual-rule", "proto": "tcp", "dst_port": "443",
+         "fwd_port": "443", "fwd_ip": "192.168.0.5", "enabled": True}
+    ]
+    local_client = MagicMock()
+    local_client.list_port_forwards = AsyncMock(return_value=local_rules)
+    wan_client = MagicMock()
+    wan_client.list_port_forwards = AsyncMock(return_value=[])
+    wan_client.create_port_forward = AsyncMock()
+    await sync(local_client, wan_client, config)
+    wan_client.create_port_forward.assert_not_awaited()
+
+
+async def test_sync_continues_after_single_rule_failure():
+    from sync import sync, Config
+    config = Config(
+        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
+    )
+    local_rules = [
+        {"name": "unifi-sync rule-a", "proto": "tcp", "dst_port": "80",
+         "fwd_port": "80", "fwd_ip": "x", "enabled": True},
+        {"name": "unifi-sync rule-b", "proto": "tcp", "dst_port": "443",
+         "fwd_port": "443", "fwd_ip": "x", "enabled": True},
+    ]
+    local_client = MagicMock()
+    local_client.list_port_forwards = AsyncMock(return_value=local_rules)
+    wan_client = MagicMock()
+    wan_client.list_port_forwards = AsyncMock(return_value=[])
+    call_count = 0
+
+    async def create_side_effect(rule):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise Exception("API error on first rule")
+        return {}
+
+    wan_client.create_port_forward = create_side_effect
+    await sync(local_client, wan_client, config)
+    assert call_count == 2
