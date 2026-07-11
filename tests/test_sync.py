@@ -63,7 +63,7 @@ async def test_discover_sets_host_and_site():
         return_value=httpx.Response(200, json={"data": [{"id": "host-abc"}]})
     )
     respx.get(
-        "https://api.ui.com/v1/connector/consoles/host-abc/proxy/network/v1/sites"
+        "https://api.ui.com/v1/connector/consoles/host-abc/proxy/network/api/self/sites"
     ).mock(return_value=httpx.Response(200, json={"data": [{"name": "default"}]}))
     await client.discover()
     assert client.host_id == "host-abc"
@@ -91,7 +91,7 @@ async def test_discover_exits_on_empty_sites():
         return_value=httpx.Response(200, json={"data": [{"id": "host-abc"}]})
     )
     respx.get(
-        "https://api.ui.com/v1/connector/consoles/host-abc/proxy/network/v1/sites"
+        "https://api.ui.com/v1/connector/consoles/host-abc/proxy/network/api/self/sites"
     ).mock(return_value=httpx.Response(200, json={"data": []}))
     with pytest.raises(SystemExit):
         await client.discover()

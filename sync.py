@@ -92,7 +92,7 @@ class UnifiClient:
 
         site_data = await self._request_with_retry(
             "GET",
-            f"/v1/connector/consoles/{self.host_id}/proxy/network/v1/sites",
+            f"/v1/connector/consoles/{self.host_id}/proxy/network/api/self/sites",
         )
         sites = site_data.get("data", [])
         if not sites:
