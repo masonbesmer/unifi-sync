@@ -52,8 +52,8 @@ Syncs tagged port forwarding rules from a LOCAL UniFi router to a WAN UniFi rout
 
 ## Prerequisites
 
-- Two UniFi routers managed via [unifi.ui.com](https://unifi.ui.com)
-- API keys for both routers — generate at **unifi.ui.com → Settings → API**
+- Two UniFi routers (can be on different UniFi Cloud accounts)
+- API key for each router — generate at **unifi.ui.com → Settings → API** on each account (or from the router's local console UI)
 - Docker (or Python 3.12+)
 
 ## Setup
@@ -77,10 +77,9 @@ cp .env.example .env
 Edit `.env`:
 
 ```env
-UNIFI_API_KEY=<api key from unifi.ui.com>
+LOCAL_ROUTER_API_KEY=<api key from LOCAL router's account at unifi.ui.com>
+WAN_ROUTER_API_KEY=<api key from WAN router's account at unifi.ui.com>
 LOCAL_ROUTER_LAN_ADR=<WAN router's IP for the local router, e.g. 192.168.1.100>
-LOCAL_ROUTER_HOST_ID=<host ID of LOCAL router — see log output on first run>
-WAN_ROUTER_HOST_ID=<host ID of WAN router — see log output on first run>
 DRY_RUN=false
 # SYNC_SCHEDULE=*/5 * * * *   # uncomment for scheduled sync; absent = run once
 SYNC_TAG=unifi-sync            # substring matched against rule name or description
@@ -113,13 +112,14 @@ python sync.py
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `UNIFI_API_KEY` | yes | — | API key from unifi.ui.com (used for both routers) |
+| `LOCAL_ROUTER_API_KEY` | yes | — | API key for the LOCAL router (generate at unifi.ui.com or from the console UI) |
+| `WAN_ROUTER_API_KEY` | yes | — | API key for the WAN router (generate from the WAN router's account or console UI) |
 | `LOCAL_ROUTER_LAN_ADR` | yes | — | IP the WAN router assigns to the LOCAL router |
-| `LOCAL_ROUTER_HOST_ID` | yes* | — | Host ID of the LOCAL router. *Required when both routers share one account. Find it in logs: `[LOCAL] Using host: <id>` |
-| `WAN_ROUTER_HOST_ID` | yes* | — | Host ID of the WAN router. *Required when both routers share one account. |
 | `DRY_RUN` | no | `false` | Log intended changes without writing to WAN router |
 | `SYNC_SCHEDULE` | no | — | Cron expression (e.g. `*/5 * * * *`). Absent = run once + exit. |
 | `SYNC_TAG` | no | `unifi-sync` | Substring matched against rule name or description |
+| `LOCAL_ROUTER_HOST_ID` | no | — | Pin LOCAL router by host ID (skips auto-discovery). Find in logs: `[LOCAL] Using host: <id>` |
+| `WAN_ROUTER_HOST_ID` | no | — | Pin WAN router by host ID (skips auto-discovery). |
 
 ## Dry Run
 

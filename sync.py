@@ -16,7 +16,8 @@ BASE_URL = "https://api.ui.com"
 
 @dataclass
 class Config:
-    api_key: str
+    local_api_key: str
+    wan_api_key: str
     local_router_lan_adr: str
     dry_run: bool
     sync_schedule: str | None
@@ -26,11 +27,13 @@ class Config:
 
 
 def load_config() -> Config:
-    api_key = os.environ.get("UNIFI_API_KEY", "")
+    local_api_key = os.environ.get("LOCAL_ROUTER_API_KEY", "")
+    wan_api_key = os.environ.get("WAN_ROUTER_API_KEY", "")
     lan_adr = os.environ.get("LOCAL_ROUTER_LAN_ADR", "")
     missing = [
         name for name, val in [
-            ("UNIFI_API_KEY", api_key),
+            ("LOCAL_ROUTER_API_KEY", local_api_key),
+            ("WAN_ROUTER_API_KEY", wan_api_key),
             ("LOCAL_ROUTER_LAN_ADR", lan_adr),
         ]
         if not val
@@ -39,7 +42,8 @@ def load_config() -> Config:
         log.error("Missing required env vars: %s", ", ".join(missing))
         sys.exit(1)
     return Config(
-        api_key=api_key,
+        local_api_key=local_api_key,
+        wan_api_key=wan_api_key,
         local_router_lan_adr=lan_adr,
         dry_run=os.environ.get("DRY_RUN", "false").lower() == "true",
         sync_schedule=os.environ.get("SYNC_SCHEDULE") or None,
@@ -203,8 +207,8 @@ async def sync(local: UnifiClient, wan: UnifiClient, config: Config) -> None:
 
 async def main() -> None:
     config = load_config()
-    local = UnifiClient(config.api_key, "LOCAL", host_id=config.local_host_id)
-    wan = UnifiClient(config.api_key, "WAN", host_id=config.wan_host_id)
+    local = UnifiClient(config.local_api_key, "LOCAL", host_id=config.local_host_id)
+    wan = UnifiClient(config.wan_api_key, "WAN", host_id=config.wan_host_id)
     try:
         await local.discover()
         await wan.discover()
