@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 
 def test_load_config_exits_when_all_required_missing(monkeypatch):
-    for key in ("WAN_ROUTER_API_KEY", "LOCAL_ROUTER_API_KEY", "LOCAL_ROUTER_LAN_ADR"):
+    for key in ("UNIFI_API_KEY", "LOCAL_ROUTER_LAN_ADR"):
         monkeypatch.delenv(key, raising=False)
     with pytest.raises(SystemExit) as exc_info:
         from sync import load_config
@@ -16,8 +16,7 @@ def test_load_config_exits_when_all_required_missing(monkeypatch):
 
 
 def test_load_config_exits_when_one_required_missing(monkeypatch):
-    monkeypatch.setenv("WAN_ROUTER_API_KEY", "wan-key")
-    monkeypatch.setenv("LOCAL_ROUTER_API_KEY", "local-key")
+    monkeypatch.setenv("UNIFI_API_KEY", "my-key")
     monkeypatch.delenv("LOCAL_ROUTER_LAN_ADR", raising=False)
     with pytest.raises(SystemExit):
         from sync import load_config
@@ -25,16 +24,14 @@ def test_load_config_exits_when_one_required_missing(monkeypatch):
 
 
 def test_load_config_applies_defaults(monkeypatch):
-    monkeypatch.setenv("WAN_ROUTER_API_KEY", "wan-key")
-    monkeypatch.setenv("LOCAL_ROUTER_API_KEY", "local-key")
+    monkeypatch.setenv("UNIFI_API_KEY", "my-key")
     monkeypatch.setenv("LOCAL_ROUTER_LAN_ADR", "10.0.0.1")
     monkeypatch.delenv("DRY_RUN", raising=False)
     monkeypatch.delenv("SYNC_SCHEDULE", raising=False)
     monkeypatch.delenv("SYNC_TAG", raising=False)
     from sync import load_config
     config = load_config()
-    assert config.wan_api_key == "wan-key"
-    assert config.local_api_key == "local-key"
+    assert config.api_key == "my-key"
     assert config.local_router_lan_adr == "10.0.0.1"
     assert config.dry_run is False
     assert config.sync_schedule is None
@@ -42,8 +39,7 @@ def test_load_config_applies_defaults(monkeypatch):
 
 
 def test_load_config_reads_explicit_values(monkeypatch):
-    monkeypatch.setenv("WAN_ROUTER_API_KEY", "w")
-    monkeypatch.setenv("LOCAL_ROUTER_API_KEY", "l")
+    monkeypatch.setenv("UNIFI_API_KEY", "my-key")
     monkeypatch.setenv("LOCAL_ROUTER_LAN_ADR", "192.168.1.1")
     monkeypatch.setenv("DRY_RUN", "true")
     monkeypatch.setenv("SYNC_SCHEDULE", "*/5 * * * *")
@@ -249,7 +245,7 @@ def test_rules_differ_returns_false_when_same():
 async def test_sync_creates_missing_rule():
     from sync import sync, Config
     config = Config(
-        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        api_key="k", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
         wan_host_id=None, local_host_id=None,
     )
@@ -271,7 +267,7 @@ async def test_sync_creates_missing_rule():
 async def test_sync_deletes_removed_rule():
     from sync import sync, Config
     config = Config(
-        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        api_key="k", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
         wan_host_id=None, local_host_id=None,
     )
@@ -291,7 +287,7 @@ async def test_sync_deletes_removed_rule():
 async def test_sync_updates_changed_rule():
     from sync import sync, Config
     config = Config(
-        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        api_key="k", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
         wan_host_id=None, local_host_id=None,
     )
@@ -318,7 +314,7 @@ async def test_sync_updates_changed_rule():
 async def test_sync_noop_when_already_in_sync():
     from sync import sync, Config
     config = Config(
-        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        api_key="k", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
         wan_host_id=None, local_host_id=None,
     )
@@ -342,7 +338,7 @@ async def test_sync_noop_when_already_in_sync():
 async def test_sync_dry_run_skips_all_writes():
     from sync import sync, Config
     config = Config(
-        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        api_key="k", local_router_lan_adr="10.0.0.1",
         dry_run=True, sync_schedule=None, sync_tag="unifi-sync",
         wan_host_id=None, local_host_id=None,
     )
@@ -362,7 +358,7 @@ async def test_sync_dry_run_skips_all_writes():
 async def test_sync_ignores_untagged_rules():
     from sync import sync, Config
     config = Config(
-        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        api_key="k", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
         wan_host_id=None, local_host_id=None,
     )
@@ -382,7 +378,7 @@ async def test_sync_ignores_untagged_rules():
 async def test_sync_continues_after_single_rule_failure():
     from sync import sync, Config
     config = Config(
-        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        api_key="k", local_router_lan_adr="10.0.0.1",
         dry_run=False, sync_schedule=None, sync_tag="unifi-sync",
         wan_host_id=None, local_host_id=None,
     )
@@ -414,8 +410,8 @@ async def test_sync_continues_after_single_rule_failure():
 
 async def test_main_run_once_calls_close(monkeypatch):
     """main() calls close() on both clients even in run-once mode."""
-    monkeypatch.setenv("WAN_ROUTER_API_KEY", "w")
-    monkeypatch.setenv("LOCAL_ROUTER_API_KEY", "l")
+    monkeypatch.setenv("UNIFI_API_KEY", "k")
+    
     monkeypatch.setenv("LOCAL_ROUTER_LAN_ADR", "10.0.0.1")
     monkeypatch.delenv("SYNC_SCHEDULE", raising=False)
 
@@ -439,8 +435,8 @@ async def test_main_run_once_calls_close(monkeypatch):
 
 async def test_main_close_called_even_on_discover_error(monkeypatch):
     """main() finally block closes clients even when discover() raises."""
-    monkeypatch.setenv("WAN_ROUTER_API_KEY", "w")
-    monkeypatch.setenv("LOCAL_ROUTER_API_KEY", "l")
+    monkeypatch.setenv("UNIFI_API_KEY", "k")
+    
     monkeypatch.setenv("LOCAL_ROUTER_LAN_ADR", "10.0.0.1")
     monkeypatch.delenv("SYNC_SCHEDULE", raising=False)
 
@@ -463,8 +459,8 @@ async def test_main_close_called_even_on_discover_error(monkeypatch):
 
 async def test_main_scheduler_used_when_sync_schedule_set(monkeypatch):
     """main() creates AsyncIOScheduler when SYNC_SCHEDULE is set."""
-    monkeypatch.setenv("WAN_ROUTER_API_KEY", "w")
-    monkeypatch.setenv("LOCAL_ROUTER_API_KEY", "l")
+    monkeypatch.setenv("UNIFI_API_KEY", "k")
+    
     monkeypatch.setenv("LOCAL_ROUTER_LAN_ADR", "10.0.0.1")
     monkeypatch.setenv("SYNC_SCHEDULE", "*/5 * * * *")
 
@@ -505,7 +501,7 @@ async def test_main_scheduler_used_when_sync_schedule_set(monkeypatch):
 async def test_sync_dry_run_skips_delete():
     from sync import sync, Config
     config = Config(
-        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        api_key="k", local_router_lan_adr="10.0.0.1",
         dry_run=True, sync_schedule=None, sync_tag="unifi-sync",
         wan_host_id=None, local_host_id=None,
     )
@@ -525,7 +521,7 @@ async def test_sync_dry_run_skips_delete():
 async def test_sync_dry_run_skips_update():
     from sync import sync, Config
     config = Config(
-        wan_api_key="w", local_api_key="l", local_router_lan_adr="10.0.0.1",
+        api_key="k", local_router_lan_adr="10.0.0.1",
         dry_run=True, sync_schedule=None, sync_tag="unifi-sync",
         wan_host_id=None, local_host_id=None,
     )
@@ -572,8 +568,8 @@ def test_is_tagged_missing_comment_key():
 
 async def test_main_run_sync_swallows_exceptions(monkeypatch):
     """run_sync() catches sync() exceptions without propagating."""
-    monkeypatch.setenv("WAN_ROUTER_API_KEY", "w")
-    monkeypatch.setenv("LOCAL_ROUTER_API_KEY", "l")
+    monkeypatch.setenv("UNIFI_API_KEY", "k")
+    
     monkeypatch.setenv("LOCAL_ROUTER_LAN_ADR", "10.0.0.1")
     monkeypatch.delenv("SYNC_SCHEDULE", raising=False)
 

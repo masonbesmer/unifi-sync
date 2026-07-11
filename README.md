@@ -77,9 +77,10 @@ cp .env.example .env
 Edit `.env`:
 
 ```env
-WAN_ROUTER_API_KEY=<api key from WAN router>
-LOCAL_ROUTER_API_KEY=<api key from LOCAL router>
+UNIFI_API_KEY=<api key from unifi.ui.com>
 LOCAL_ROUTER_LAN_ADR=<WAN router's IP for the local router, e.g. 192.168.1.100>
+LOCAL_ROUTER_HOST_ID=<host ID of LOCAL router — see log output on first run>
+WAN_ROUTER_HOST_ID=<host ID of WAN router — see log output on first run>
 DRY_RUN=false
 # SYNC_SCHEDULE=*/5 * * * *   # uncomment for scheduled sync; absent = run once
 SYNC_TAG=unifi-sync            # substring matched against rule name or description
@@ -112,9 +113,10 @@ python sync.py
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `WAN_ROUTER_API_KEY` | yes | — | API key for the WAN router |
-| `LOCAL_ROUTER_API_KEY` | yes | — | API key for the LOCAL router |
+| `UNIFI_API_KEY` | yes | — | API key from unifi.ui.com (used for both routers) |
 | `LOCAL_ROUTER_LAN_ADR` | yes | — | IP the WAN router assigns to the LOCAL router |
+| `LOCAL_ROUTER_HOST_ID` | yes* | — | Host ID of the LOCAL router. *Required when both routers share one account. Find it in logs: `[LOCAL] Using host: <id>` |
+| `WAN_ROUTER_HOST_ID` | yes* | — | Host ID of the WAN router. *Required when both routers share one account. |
 | `DRY_RUN` | no | `false` | Log intended changes without writing to WAN router |
 | `SYNC_SCHEDULE` | no | — | Cron expression (e.g. `*/5 * * * *`). Absent = run once + exit. |
 | `SYNC_TAG` | no | `unifi-sync` | Substring matched against rule name or description |
